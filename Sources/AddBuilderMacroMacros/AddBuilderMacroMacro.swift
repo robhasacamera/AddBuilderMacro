@@ -53,9 +53,9 @@ private struct ParamModel {
         secondName ?? firstName
     }
 
-    var setterFunc: String {
+    func setterFunc(accessLevel: String) -> String {
         """
-            @discardableResult func \(paramName)(_ value: \(type)) -> Self {
+            @discardableResult \(accessLevel) func \(paramName)(_ value: \(type)) -> Self {
                 \(paramName) = value
 
                 return self
@@ -63,8 +63,8 @@ private struct ParamModel {
         """
     }
 
-    func modelFieldOption(structName:String, index: Int) -> String {
-        "        static let \(paramName) = \(structName)Fields(rawValue: 1 << \(index))"
+    func modelFieldOption(accessLevel: String, index: Int) -> String {
+        "        static \(accessLevel) let \(paramName) = Fields(rawValue: 1 << \(index))"
     }
 
     var builderVar: String {
@@ -91,10 +91,10 @@ private extension Array where Element == ParamModel {
         map(\.builderVar).joined(separator: "\n")
     }
 
-    func unsetFields(structName: String) -> String {
+    func unsetFields(accessLevel: String) -> String {
         """
-            var unsetFields: \(structName)Fields {
-                var fields: \(structName)Fields = []
+            \(accessLevel) var unsetFields: Fields {
+                var fields: Fields = []
 
         \(map(\.unsetFieldInsertCheck).joined(separator: "\n\n\n"))
 
@@ -111,8 +111,8 @@ private extension Array where Element == ParamModel {
 
     // MARK: Setters
 
-    var setters: String {
-        map(\.setterFunc).joined(separator: "\n")
+    func setters(accessLevel: String) -> String {
+        map({ $0.setterFunc(accessLevel: accessLevel) }).joined(separator: "\n")
     }
 
     // MARK: ModelFields
@@ -125,17 +125,17 @@ private extension Array where Element == ParamModel {
         filter { $0.isOptional }
     }
 
-    func modelFieldOptionSet(structName: String)-> String {
+    func modelFieldOptionSet(accessLevel: String) -> String {
         """
-            struct \(structName)Fields: OptionSet {
+            \(accessLevel) struct Fields: OptionSet {
                 let rawValue: Int
 
-        \(indices.map { self[$0].modelFieldOption(structName: structName, index: $0) }.joined(separator: "\n"))
+        \(indices.map { self[$0].modelFieldOption(accessLevel: accessLevel, index: $0) }.joined(separator: "\n"))
 
-                static let none: \(structName)Fields = []
-                static let required: \(structName)Fields = [\(required.map { $0.fieldName }.joined(separator: ", "))]
-                static let optional: \(structName)Fields = [\(optional.map { $0.fieldName }.joined(separator: ", "))]
-                static let all: \(structName)Fields = [\(map { $0.fieldName }.joined(separator: ", "))]
+                static \(accessLevel) let none: Fields = []
+                static \(accessLevel) let required: Fields = [\(required.map { $0.fieldName }.joined(separator: ", "))]
+                static \(accessLevel) let optional: Fields = [\(optional.map { $0.fieldName }.joined(separator: ", "))]
+                static \(accessLevel) let all: Fields = [\(map { $0.fieldName }.joined(separator: ", "))]
             }
         """
     }
@@ -152,8 +152,18 @@ public struct AddBuilderMacro: MemberMacro {
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
         guard let structDecl = declaration as? StructDeclSyntax else {
-            throw AsyncDeclError.onlyApplicableToStruct
+            throw AddBuilderMacroError.onlyApplicableToStruct
         }
+
+        let accessModifier = structDecl.modifiers.map(\.name.text).filter {
+            $0 == "private"
+            || $0 == "fileprivate"
+            || $0 == "internal"
+            || $0 == "public"
+        }.first
+
+        // we adjust the access to fileprivate if private so you can access the builder outside of the struct.
+        let accessLevel = accessModifier == "private" ? "fileprivate" : accessModifier ?? "internal"
 
         let structName = structDecl.name.text
 
@@ -164,7 +174,7 @@ public struct AddBuilderMacro: MemberMacro {
         for member in structDecl.memberBlock.members {
             if let foundInitDecl = member.decl.as(InitializerDeclSyntax.self) {
                 guard initDecl == nil else {
-                    throw AsyncDeclError.onlyAllowsSingleInitializer
+                    throw AddBuilderMacroError.onlyAllowsSingleInitializer
                 }
 
                 initDecl = foundInitDecl
@@ -191,11 +201,11 @@ public struct AddBuilderMacro: MemberMacro {
         } else {
             for varDecl in varDecls {
                 guard let name = varDecl.bindings.first?.pattern.description else {
-                    throw AsyncDeclError.failedToFindPropertyName
+                    throw AddBuilderMacroError.failedToFindPropertyName
                 }
 
                 guard let type = varDecl.bindings.first?.typeAnnotation?.description else {
-                    throw AsyncDeclError.failedToFindPropertyType
+                    throw AddBuilderMacroError.failedToFindPropertyType
                 }
 
                 params.append(
@@ -209,42 +219,42 @@ public struct AddBuilderMacro: MemberMacro {
         }
 
         return [DeclSyntax(stringLiteral: """
-        class \(structName)Builder {
+        \(accessLevel) class Builder {
         \(params.builderVars)
-        
-        \(params.unsetFields(structName: structName))
-        
-            var unsetRequiredFields: \(structName)Fields {
-                unsetFields.intersection(\(structName)Fields.required)
+
+        \(params.unsetFields(accessLevel: accessLevel))
+
+           \(accessLevel) var unsetRequiredFields: Fields {
+                unsetFields.intersection(Fields.required)
             }
 
-            var isBuildable: Bool {
+           \(accessLevel) var isBuildable: Bool {
                 unsetRequiredFields.isEmpty
             }
 
-            init() {}
+           \(accessLevel) init() {}
 
-        \(params.setters)
-        
-            func build() throws -> \(structName) {
+        \(params.setters(accessLevel: accessLevel))
+
+           \(accessLevel) func build() throws -> \(structName) {
                 guard isBuildable else {
-                    throw \(structName)BuilderError.requiredFieldsNotSet(unsetRequiredFields)
+                    throw BuilderError.requiredFieldsNotSet(unsetRequiredFields)
                 }
 
                 return \(structName)(\(params.initParams))
             }
-        
-        \(params.modelFieldOptionSet(structName: structName))
-        
-            enum \(structName)BuilderError: Error {
-                case requiredFieldsNotSet(\(structName)Fields)
+
+        \(params.modelFieldOptionSet(accessLevel: accessLevel))
+
+           \(accessLevel) enum BuilderError: Error {
+                case requiredFieldsNotSet(Fields)
             }
         }
         """)]
     }
 }
 
-public enum AsyncDeclError: CustomStringConvertible, Error {
+public enum AddBuilderMacroError: CustomStringConvertible, Error {
     case onlyApplicableToStruct
     case onlyAllowsSingleInitializer
     case failedToFindPropertyName

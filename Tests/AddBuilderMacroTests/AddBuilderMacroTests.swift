@@ -13,6 +13,7 @@ let testMacros: [String: Macro.Type] = [
 ]
 #endif
 
+// FIXME: This test fails, even though the syntax seems to match.
 final class AddBuilderMacroTests: XCTestCase {
     func testMacro() throws {
         #if canImport(AddBuilderMacroMacros)
@@ -33,32 +34,34 @@ final class AddBuilderMacroTests: XCTestCase {
             """,
             expandedSource:
             """
-            struct Model {
+            public struct Model {
                 let a: String
                 let b: Int
                 let c: Bool?
-
+            
                 init(a: String, b: Int, c: Bool?) {
                     self.a = a
                     self.b = b
                     self.c = c
                 }
-
-                class ModelBuilder {
+            
+                internal class Builder {
                     private(set) var a: String?
                     private(set) var b: Int?
                     private(set) var c: Bool?
 
-                    var unsetFields: ModelFields {
-                        var fields: ModelFields = []
+                    internal var unsetFields: Fields {
+                        var fields: Fields = []
 
                         if a == nil {
                             fields.insert(.a)
                         }
 
+
                         if b == nil {
                             fields.insert(.b)
                         }
+
 
                         if c == nil {
                             fields.insert(.c)
@@ -67,62 +70,62 @@ final class AddBuilderMacroTests: XCTestCase {
                         return fields
                     }
 
-                    var unsetRequiredFields: ModelFields {
-                        unsetFields.intersection(ModelFields.required)
+                   internal var unsetRequiredFields: Fields {
+                        unsetFields.intersection(Fields.required)
                     }
 
-                    var isBuildable: Bool {
+                   internal var isBuildable: Bool {
                         unsetRequiredFields.isEmpty
                     }
 
-                    init() {}
+                   internal init() {}
 
-                    @discardableResult func a(_ value: String) -> Self {
+                    @discardableResult internal func a(_ value: String) -> Self {
                         a = value
 
                         return self
                     }
-
-                    @discardableResult func b(_ value: Int) -> Self {
+                    @discardableResult internal func b(_ value: Int) -> Self {
                         b = value
 
                         return self
                     }
-
-                    @discardableResult func c(_ value: Bool?) -> Self {
+                    @discardableResult internal func c(_ value: Bool?) -> Self {
                         c = value
 
                         return self
                     }
 
-                    func build() throws -> Model {
+                   internal func build() throws -> Model {
                         guard isBuildable else {
-                            throw ModelBuilderError.requiredFieldsNotSet(unsetRequiredFields)
+                            throw BuilderError.requiredFieldsNotSet(unsetRequiredFields)
                         }
 
                         return Model(a: a!, b: b!, c: c)
                     }
 
-                    struct ModelFields: OptionSet {
-                        let rawValue: Int
+                    internal struct Fields: OptionSet {
+                        internal let rawValue: Int
 
-                        static let a = ModelFields(rawValue: 1 << 0)
-                        static let b = ModelFields(rawValue: 1 << 1)
-                        static let c = ModelFields(rawValue: 1 << 2)
+                        static internal let a = Fields(rawValue: 1 << 0)
+                        static internal let b = Fields(rawValue: 1 << 1)
+                        static internal let c = Fields(rawValue: 1 << 2)
 
-                        static let none: ModelFields = []
-                        static let required: ModelFields = [.a, .b]
-                        static let optional: ModelFields = [.c]
-                        static let all: ModelFields = [.a, .b, .c]
+                        static internal let none: Fields = []
+                        static internal let required: Fields = [.a, .b]
+                        static internal let optional: Fields = [.c]
+                        static internal let all: Fields = [.a, .b, .c]
                     }
 
-                    enum ModelBuilderError: Error {
-                        case requiredFieldsNotSet(ModelFields)
+                   internal enum BuilderError: Error {
+                        case requiredFieldsNotSet(Fields)
                     }
                 }
             }
             """,
             macros: testMacros
+//            ,
+//            indentationWidth: .
         )
         #else
         throw XCTSkip("macros are only supported when running tests for the host platform")
